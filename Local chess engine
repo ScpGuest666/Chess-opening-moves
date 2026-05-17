@@ -1,5 +1,5 @@
 -- PASTE YOUR CLOUDFLARE LINK HERE (Keep the quotes, no slash at the end)
-local POCO_URL = "https://23a0008672eb4d.lhr.life"
+local POCO_URL = "https://6aea9801f438a1.lhr.life"
 
 -- Wait for player to load
 local PlayerService = game:GetService("Players")
