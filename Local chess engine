@@ -1,5 +1,5 @@
--- PASTE YOUR CLOUDFLARE LINK HERE (Keep the quotes, no slash at the end)
-local POCO_URL = "https://55d82a0072f0ed.lhr.life"
+-- PASTE YOUR TUNNEL LINK HERE
+local POCO_URL = "https://e40e992aab6e94.lhr.life"
 
 -- Wait for player to load
 local PlayerService = game:GetService("Players")
@@ -586,7 +586,12 @@ local function executeAIMove(color)
     statusLabel.Text = "Thinking... (" .. apiToUse .. ")"
     task.wait(0.1)
 
+    local myState = stateVersion
     local uci = getBestMoveFromAPI(getFEN(), apiToUse)
+    
+    -- If the clipboard loop already made the move while we were waiting for HTTP, abort!
+    if stateVersion ~= myState then return end
+
     if uci then
         local fr,fc,tr,tc,promo = uciToMove(uci)
         executeMove({fromR=fr,fromC=fc,toR=tr,toC=tc,piece=squares[fr][fc].Text}, color, promo)
@@ -596,6 +601,42 @@ local function executeAIMove(color)
     end
     isThinking = false
 end
+
+-- --- CLIPBOARD FALLBACK LOOP ---
+local lastClipboardMove = ""
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if isThinking then
+            local success, clip = pcall(function() return getclipboard and getclipboard() or "" end)
+            if success and type(clip) == "string" then
+                local moveStr = clip:match("^POCO_MOVE:(%w+)$")
+                if moveStr and moveStr ~= lastClipboardMove then
+                    lastClipboardMove = moveStr
+                    local fr, fc, tr, tc, promo = uciToMove(moveStr)
+                    if fr and fc and tr and tc then
+                        -- Validate the move to ensure it's for the current board state
+                        local legalMoves = generateLegalMoves(copyBoard(squares), currentTurn)
+                        local isValid = false
+                        for _, m in ipairs(legalMoves) do
+                            if m.fromR == fr and m.fromC == fc and m.toR == tr and m.toC == tc then
+                                isValid = true
+                                break
+                            end
+                        end
+                        
+                        if isValid then
+                            executeMove({fromR=fr,fromC=fc,toR=tr,toC=tc,piece=squares[fr][fc].Text}, currentTurn, promo)
+                            isThinking = false
+                            -- Clear clipboard to prevent accidental reuse
+                            if setclipboard then pcall(setclipboard, "") end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
 
 local function trainingLoop()
     while isTraining and not gamePaused do
