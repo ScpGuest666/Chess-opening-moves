@@ -1,5 +1,5 @@
 -- PASTE YOUR TUNNEL LINK HERE
-local POCO_URL = "https://e40e992aab6e94.lhr.life"
+local POCO_URL = "https://51fec05926a3bd.lhr.life"
 
 -- Wait for player to load
 local PlayerService = game:GetService("Players")
