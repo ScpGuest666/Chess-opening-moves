@@ -365,9 +365,11 @@ local persistentModelColors = {}   -- Caches the assigned color of 3D models
 local detectedPlayerColor = nil    -- The color assigned to the player based on camera
 
 -- Suggestion highlighting
-local currentSuggestion = nil -- { fromR, fromC, toR, toC }
-local currentSuggestion3DHighlight = nil -- Highlight object on the 3D piece
-local currentSuggestion3DPlatform = nil -- Green platform on the 3D board
+local currentEngineSuggestion = nil
+local currentEndgameSuggestion = nil
+local createdSuggestionHighlights = {}
+local createdSuggestionPlatforms = {}
+local suggestionTweens = {}
 
 -- --- Helper Functions ---
 local function copyHasMoved(hm) local c = {}; for k, v in pairs(hm) do c[k] = v end; return c end
@@ -530,19 +532,11 @@ local function identifyTarget(model, teamColor, teamName, pieceType)
     end
 end
 
-local function clearSuggestion3DPlatform()
-    if currentSuggestion3DPlatform and currentSuggestion3DPlatform.Parent then
-        currentSuggestion3DPlatform:Destroy()
-    end
-    currentSuggestion3DPlatform = nil
-end
-
 local function clear3DVisuals()
     for _, v in pairs(createdVisuals) do
         if v then pcall(v.Destroy, v) end
     end
     createdVisuals = {}
-    clearSuggestion3DPlatform()
 end
 
 local function setBoardFlipped(flipped)
@@ -1136,146 +1130,168 @@ local function highlightValidMoves(sr,sc, pieceColor)
     end 
 end
 
--- --- Suggestion Highlight Functions (with 3D yellow highlight using pieceMap) ---
-local function clearSuggestion3DHighlight()
-    if currentSuggestion3DHighlight and currentSuggestion3DHighlight.Parent then
-        currentSuggestion3DHighlight:Destroy()
+-- --- Suggestion Highlight Functions (Dual Engine/Endgame Support) ---
+local function clearSuggestionsDisplay()
+    for _, tw in pairs(suggestionTweens) do
+        pcall(function() tw:Cancel() end)
     end
-    currentSuggestion3DHighlight = nil
+    suggestionTweens = {}
+    
+    for _, hl in pairs(createdSuggestionHighlights) do
+        if hl and hl.Parent then hl:Destroy() end
+    end
+    createdSuggestionHighlights = {}
+    
+    for _, plat in pairs(createdSuggestionPlatforms) do
+        if plat and plat.Parent then plat:Destroy() end
+    end
+    createdSuggestionPlatforms = {}
+    
+    clearHighlights()
+    if #moveHistory > 0 then
+        local pm = moveHistory[#moveHistory]
+        if squares[pm.fromR] and squares[pm.fromR][pm.fromC] then
+            squares[pm.fromR][pm.fromC].BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+        end
+        if squares[pm.toR] and squares[pm.toR][pm.toC] then
+            squares[pm.toR][pm.toC].BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+        end
+    end
 end
 
-local function highlightSuggested3DPiece(row, col, isEndgame)
-    if not isMatching or not currentPieceMap then return end
-    local key = row..","..col
-    local model = currentPieceMap[key]
-    if model then
-        clearSuggestion3DHighlight()
-        local hl = Instance.new("Highlight")
-        hl.Name = "SuggestionHighlight"
-        hl.Adornee = model
-        local hlColor = isEndgame and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 0)
-        hl.FillColor = hlColor
-        hl.OutlineColor = hlColor
-        hl.FillTransparency = 0.5
-        hl.Parent = model
-        currentSuggestion3DHighlight = hl
+local function drawMoveHighlight(move, color1, color2)
+    -- 1. 2D Board
+    local fromSq = squares[move.fromR][move.fromC]
+    local toSq = squares[move.toR][move.toC]
+    
+    if color2 then
+        local tw1 = TweenService:Create(fromSq, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {BackgroundColor3 = color2})
+        fromSq.BackgroundColor3 = color1
+        tw1:Play()
+        table.insert(suggestionTweens, tw1)
+        
+        local tw2 = TweenService:Create(toSq, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {BackgroundColor3 = color2})
+        toSq.BackgroundColor3 = color1
+        tw2:Play()
+        table.insert(suggestionTweens, tw2)
     else
-        clearSuggestion3DHighlight()
+        fromSq.BackgroundColor3 = color1
+        toSq.BackgroundColor3 = color1
+    end
+    
+    -- 2. 3D Piece
+    if isMatching and currentPieceMap then
+        local key = move.fromR..","..move.fromC
+        local model = currentPieceMap[key]
+        if model then
+            local hl = Instance.new("Highlight")
+            hl.Name = "SuggestionHighlight"
+            hl.Adornee = model
+            hl.FillColor = color1
+            hl.OutlineColor = color1
+            hl.FillTransparency = 0.5
+            hl.Parent = model
+            table.insert(createdSuggestionHighlights, hl)
+            
+            if color2 then
+                local tw = TweenService:Create(hl, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {FillColor = color2, OutlineColor = color2})
+                tw:Play()
+                table.insert(suggestionTweens, tw)
+            end
+        end
+    end
+    
+    -- 3. 3D Platform
+    if isMatching and boardAnchor then
+        local actualR = boardAnchor.flipRow and (9 - move.toR) or move.toR
+        local actualC = boardAnchor.flipCol and (9 - move.toC) or move.toC
+        local targetX = boardAnchor.minX + (actualC - 1) * boardAnchor.squareSizeX
+        local targetZ = boardAnchor.minZ + (actualR - 1) * boardAnchor.squareSizeZ
+        
+        local rayOrigin = Vector3.new(targetX, boardAnchor.baseY + 15, targetZ)
+        local rayDirection = Vector3.new(0, -30, 0)
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        local ignoreList = {}
+        if player.Character then table.insert(ignoreList, player.Character) end
+        for _, model in pairs(currentPieceMap) do
+            if model and typeof(model) == "Instance" then table.insert(ignoreList, model) end
+        end
+        rayParams.FilterDescendantsInstances = ignoreList
+        
+        local rayResult = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+        local platformY = boardAnchor.baseY
+        if rayResult then platformY = rayResult.Position.Y end
+        
+        local platformPart = Instance.new("Part")
+        platformPart.Name = "SuggestionPlatformAnchor"
+        platformPart.Anchored = true
+        platformPart.CanCollide = false
+        platformPart.Transparency = 1
+        platformPart.Size = Vector3.new(0.1, 0.1, 0.1)
+        platformPart.Position = Vector3.new(targetX, platformY, targetZ)
+        platformPart.Parent = workspace
+        table.insert(createdSuggestionPlatforms, platformPart)
+        
+        local adornment = Instance.new("BoxHandleAdornment")
+        adornment.Name = "SuggestionPlatformAdornment"
+        adornment.Size = Vector3.new(boardAnchor.squareSizeX * 0.9, 0.4, boardAnchor.squareSizeZ * 0.9)
+        adornment.Color3 = color1
+        adornment.Transparency = 0.5
+        adornment.AlwaysOnTop = true
+        adornment.ZIndex = 10
+        adornment.Adornee = platformPart
+        adornment.Parent = platformPart
+        
+        local rodAdornment = Instance.new("CylinderHandleAdornment")
+        rodAdornment.Name = "SuggestionPlatformRod"
+        rodAdornment.Radius = 0.15
+        rodAdornment.Height = 10
+        rodAdornment.Color3 = color1
+        rodAdornment.Transparency = 0.3
+        rodAdornment.AlwaysOnTop = true
+        rodAdornment.ZIndex = 10
+        rodAdornment.CFrame = CFrame.Angles(math.pi/2, 0, 0)
+        rodAdornment.Adornee = platformPart
+        rodAdornment.Parent = platformPart
+        
+        if color2 then
+            local tw1 = TweenService:Create(adornment, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color3 = color2})
+            tw1:Play()
+            table.insert(suggestionTweens, tw1)
+            
+            local tw2 = TweenService:Create(rodAdornment, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color3 = color2})
+            tw2:Play()
+            table.insert(suggestionTweens, tw2)
+        end
     end
 end
 
-local function highlightSuggested3DPlatform(row, col, isPreliminary, isEndgame)
-    if not isMatching or not boardAnchor then return end
-    clearSuggestion3DPlatform()
+local function updateSuggestionsDisplay()
+    clearSuggestionsDisplay()
     
-    -- Map 2D row/col back to 3D grid coordinates
-    local actualR = boardAnchor.flipRow and (9 - row) or row
-    local actualC = boardAnchor.flipCol and (9 - col) or col
+    local hasEngine = currentEngineSuggestion ~= nil
+    local hasEndgame = currentEndgameSuggestion ~= nil
     
-    -- Correctly calculate the center of the target square
-    local targetX = boardAnchor.minX + (actualC - 1) * boardAnchor.squareSizeX
-    local targetZ = boardAnchor.minZ + (actualR - 1) * boardAnchor.squareSizeZ
+    local engineColor = Color3.fromRGB(0, 255, 0) -- Green
+    local endgameColor = Color3.fromRGB(255, 0, 0) -- Red
     
-    -- Raycast to find the exact top surface of the board skin
-    local rayOrigin = Vector3.new(targetX, boardAnchor.baseY + 15, targetZ)
-    local rayDirection = Vector3.new(0, -30, 0)
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    
-    local ignoreList = {}
-    if player.Character then table.insert(ignoreList, player.Character) end
-    for _, model in pairs(currentPieceMap) do
-        if model and typeof(model) == "Instance" then
-            table.insert(ignoreList, model)
+    if hasEngine and hasEndgame then
+        local sameMove = (currentEngineSuggestion.fromR == currentEndgameSuggestion.fromR and
+                          currentEngineSuggestion.fromC == currentEndgameSuggestion.fromC and
+                          currentEngineSuggestion.toR == currentEndgameSuggestion.toR and
+                          currentEngineSuggestion.toC == currentEndgameSuggestion.toC)
+        if sameMove then
+            drawMoveHighlight(currentEngineSuggestion, engineColor, endgameColor)
+        else
+            drawMoveHighlight(currentEngineSuggestion, engineColor)
+            drawMoveHighlight(currentEndgameSuggestion, endgameColor)
         end
+    elseif hasEngine then
+        drawMoveHighlight(currentEngineSuggestion, engineColor)
+    elseif hasEndgame then
+        drawMoveHighlight(currentEndgameSuggestion, endgameColor)
     end
-    rayParams.FilterDescendantsInstances = ignoreList
-    
-    local rayResult = workspace:Raycast(rayOrigin, rayDirection, rayParams)
-    local platformY = boardAnchor.baseY
-    if rayResult then
-        platformY = rayResult.Position.Y
-    end
-    
-    -- Create an invisible anchor part
-    local platformPart = Instance.new("Part")
-    platformPart.Name = "SuggestionPlatformAnchor"
-    platformPart.Anchored = true
-    platformPart.CanCollide = false
-    platformPart.Transparency = 1 -- Make the part itself invisible
-    platformPart.Size = Vector3.new(0.1, 0.1, 0.1)
-    platformPart.Position = Vector3.new(targetX, platformY, targetZ)
-    platformPart.Parent = workspace
-    
-    local platformColor
-    if isEndgame then
-        platformColor = Color3.fromRGB(255, 0, 0)
-    else
-        platformColor = isPreliminary and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(0, 255, 0)
-    end
-    
-    -- Use BoxHandleAdornment to guarantee it renders through custom board skins
-    local adornment = Instance.new("BoxHandleAdornment")
-    adornment.Name = "SuggestionPlatformAdornment"
-    adornment.Size = Vector3.new(boardAnchor.squareSizeX * 0.9, 0.4, boardAnchor.squareSizeZ * 0.9) -- Made thicker
-    adornment.Color3 = platformColor
-    adornment.Transparency = 0.5 -- 0.5 opacity
-    adornment.AlwaysOnTop = true -- Forces it to render through the board skin
-    adornment.ZIndex = 10
-    adornment.Adornee = platformPart
-    adornment.Parent = platformPart
-    
-    -- Add the requested rod centered on the platform, extruding 5 studs up and 5 studs down
-    local rodAdornment = Instance.new("CylinderHandleAdornment")
-    rodAdornment.Name = "SuggestionPlatformRod"
-    rodAdornment.Radius = 0.15
-    rodAdornment.Height = 10 -- 5 studs up, 5 studs down
-    rodAdornment.Color3 = platformColor
-    rodAdornment.Transparency = 0.3
-    rodAdornment.AlwaysOnTop = true
-    rodAdornment.ZIndex = 10
-    rodAdornment.CFrame = CFrame.Angles(math.pi/2, 0, 0) -- Rotate to point along Y axis
-    rodAdornment.Adornee = platformPart
-    rodAdornment.Parent = platformPart
-    
-    currentSuggestion3DPlatform = platformPart
-end
-
-local function clearSuggestionHighlight()
-    if currentSuggestion then
-        local fromSq = squares[currentSuggestion.fromR][currentSuggestion.fromC]
-        local toSq = squares[currentSuggestion.toR][currentSuggestion.toC]
-        if fromSq and originalColors[currentSuggestion.fromR] then
-            fromSq.BackgroundColor3 = originalColors[currentSuggestion.fromR][currentSuggestion.fromC]
-        end
-        if toSq and originalColors[currentSuggestion.toR] then
-            toSq.BackgroundColor3 = originalColors[currentSuggestion.toR][currentSuggestion.toC]
-        end
-        currentSuggestion = nil
-    end
-    clearSuggestion3DHighlight()
-    clearSuggestion3DPlatform()
-end
-
-local function showSuggestion(suggestion, isPreliminary, isEndgame)
-    if not suggestion then return end
-    clearSuggestionHighlight()
-    currentSuggestion = suggestion
-    local fromSq = squares[suggestion.fromR][suggestion.fromC]
-    local toSq = squares[suggestion.toR][suggestion.toC]
-    
-    local highlightColor2D = isEndgame and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 200, 200)
-    
-    if fromSq then
-        fromSq.BackgroundColor3 = highlightColor2D
-    end
-    if toSq then
-        toSq.BackgroundColor3 = highlightColor2D
-    end
-    -- Highlight the suggested piece in 3D
-    highlightSuggested3DPiece(suggestion.fromR, suggestion.fromC, isEndgame)
-    -- Highlight the destination square in 3D
-    highlightSuggested3DPlatform(suggestion.toR, suggestion.toC, isPreliminary, isEndgame)
 end
 
 local function suggestMoveForHuman()
@@ -1290,23 +1306,13 @@ local function suggestMoveForHuman()
     local isEndgame = (pCount <= 12)
     
     local fen = getFEN()
-    local saychessPromise = nil
     
-    -- Secretly pre-fetch Saychess move if we are using a Book API
-    if not isEndgame and (currentApi == "Opening Book" or currentApi == "25 moves") then
-        saychessPromise = {done = false, move = nil}
-        task.spawn(function()
-            saychessPromise.move = getBestMoveFromAPI(fen, "Saychess")
-            saychessPromise.done = true
-        end)
-    end
-    
+    currentEngineSuggestion = nil
+    currentEndgameSuggestion = nil
+    clearSuggestionsDisplay()
+
     if isEndgame then
-        if pCount <= 7 then
-            statusLabel.Text = "Thinking... (Lichess Syzygy)"
-        else
-            statusLabel.Text = "Thinking... (Lc0)"
-        end
+        statusLabel.Text = "Thinking... (Engine + Endgame)"
     else
         if currentApi == "Opening Book" then
             if #possibleBooks > 0 then
@@ -1331,110 +1337,111 @@ local function suggestMoveForHuman()
         end
     end
 
-    task.spawn(function()
-        local finalSuggestion = nil
-        local hasValidSuggestion = false
+    local threadsCompleted = 0
+    local threadsTotal = isEndgame and 2 or 1
 
-        local function onLiveUpdate(uciMove)
-            if myState ~= stateVersion then return end
-            if not uciMove then return end
-            
+    local function checkDone()
+        threadsCompleted = threadsCompleted + 1
+        if threadsCompleted >= threadsTotal then
+            isThinking = false
+            if myState == stateVersion then
+                if currentEngineSuggestion or currentEndgameSuggestion then
+                    local txt = "Suggestion: "
+                    if currentEngineSuggestion then
+                        txt = txt .. "[Engine: " .. string.char(96+currentEngineSuggestion.fromC) .. (9-currentEngineSuggestion.fromR) .. " → " .. string.char(96+currentEngineSuggestion.toC) .. (9-currentEngineSuggestion.toR) .. "] "
+                    end
+                    if currentEndgameSuggestion then
+                        txt = txt .. "[Endgame: " .. string.char(96+currentEndgameSuggestion.fromC) .. (9-currentEndgameSuggestion.fromR) .. " → " .. string.char(96+currentEndgameSuggestion.toC) .. (9-currentEndgameSuggestion.toR) .. "]"
+                    end
+                    statusLabel.Text = txt
+                else
+                    statusLabel.Text = "No suggestion available"
+                end
+            end
+        end
+    end
+
+    -- Thread 1: Engine (Local File Poco, Stockfish, etc.)
+    task.spawn(function()
+        local uciMove = nil
+        local apiToCall = currentApi
+        
+        if apiToCall == "Opening Book" then
+            if #possibleBooks > 0 then
+                local chosenBook = possibleBooks[math.random(1, #possibleBooks)]
+                local expectedSan = chosenBook.moves[bookPly]
+                if expectedSan then
+                    local legalMoves = generateLegalMoves(copyBoard(squares), currentTurn)
+                    local expectedMove = matchSanToMove(expectedSan, legalMoves, currentTurn)
+                    if expectedMove then
+                        currentEngineSuggestion = expectedMove
+                    end
+                end
+            end
+            if not currentEngineSuggestion then apiToCall = "Saychess" end
+        elseif apiToCall == "25 moves" then
+            if #possible25Books > 0 then
+                local chosenBook = possible25Books[math.random(1, #possible25Books)]
+                local expectedSan = chosenBook.moves[book25Ply]
+                if expectedSan then
+                    local legalMoves = generateLegalMoves(copyBoard(squares), currentTurn)
+                    local expectedMove = matchSanToMove(expectedSan, legalMoves, currentTurn)
+                    if expectedMove then
+                        currentEngineSuggestion = expectedMove
+                    end
+                end
+            end
+            if not currentEngineSuggestion then apiToCall = "Saychess" end
+        end
+        
+        if not currentEngineSuggestion and apiToCall ~= "Opening Book" and apiToCall ~= "25 moves" then
+            uciMove = getBestMoveFromAPI(fen, apiToCall)
+        end
+        
+        if myState == stateVersion and uciMove then
             local fromR, fromC, toR, toC, _ = uciToMove(uciMove)
             if fromR and fromC and toR and toC and squares[fromR] and squares[fromR][fromC] then
                 local tempBoard = applyMoveToBoard(copyBoard(squares), {fromR=fromR, fromC=fromC, toR=toR, toC=toC, piece=squares[fromR][fromC].Text})
                 local newFen = getSimpleFEN(tempBoard)
                 if positionHistory[newFen] and positionHistory[newFen] >= 2 then
-                    -- Repetition, ignore this live update
-                    return
+                    warn("API suggested a draw by repetition. Overriding with local AI.")
+                    uciMove = nil
                 end
-                
-                local suggestion = {
+            else
+                uciMove = nil
+            end
+        end
+        
+        if myState == stateVersion and uciMove then
+            local fromR, fromC, toR, toC, _ = uciToMove(uciMove)
+            if fromR and fromC and toR and toC and squares[fromR] and squares[fromR][fromC] then
+                currentEngineSuggestion = {
                     fromR = fromR, fromC = fromC,
                     toR = toR, toC = toC,
                     piece = squares[fromR][fromC].Text,
                     captured = squares[toR][toC].Text
                 }
-                showSuggestion(suggestion, true, isEndgame) -- true for preliminary (yellow/red)
-                statusLabel.Text = "Suggestion: " .. string.char(96+suggestion.fromC) .. (9-suggestion.fromR) .. " → " .. string.char(96+suggestion.toC) .. (9-suggestion.toR)
-                hasValidSuggestion = true
-                finalSuggestion = suggestion
             end
         end
 
-        local success, err = pcall(function()
-            local uciMove = nil
-            
-            if isEndgame then
-                uciMove, _ = getEndgameSuggestion(fen, pCount)
-            else
-                local apiToCall = currentApi
-                if apiToCall == "Opening Book" then
-                    if #possibleBooks > 0 then
-                        local chosenBook = possibleBooks[math.random(1, #possibleBooks)]
-                        local expectedSan = chosenBook.moves[bookPly]
-                        if expectedSan then
-                            local legalMoves = generateLegalMoves(copyBoard(squares), currentTurn)
-                            local expectedMove = matchSanToMove(expectedSan, legalMoves, currentTurn)
-                            if expectedMove then
-                                finalSuggestion = expectedMove
-                            end
-                        end
-                    end
-                    if not finalSuggestion then
-                        apiToCall = "Saychess"
-                    end
-                elseif apiToCall == "25 moves" then
-                    if #possible25Books > 0 then
-                        local chosenBook = possible25Books[math.random(1, #possible25Books)]
-                        local expectedSan = chosenBook.moves[book25Ply]
-                        if expectedSan then
-                            local legalMoves = generateLegalMoves(copyBoard(squares), currentTurn)
-                            local expectedMove = matchSanToMove(expectedSan, legalMoves, currentTurn)
-                            if expectedMove then
-                                finalSuggestion = expectedMove
-                            end
-                        end
-                    end
-                    if not finalSuggestion then
-                        apiToCall = "Saychess"
-                    end
-                end
-                
-                if not finalSuggestion and apiToCall ~= "Opening Book" and apiToCall ~= "25 moves" then
-                    if apiToCall == "Saychess" and saychessPromise then
-                        -- Wait for the secretly pre-fetched move
-                        local t = 0
-                        while not saychessPromise.done and t < 250 do
-                            t = t + 1
-                            task.wait(0.1)
-                        end
-                        uciMove = saychessPromise.move
-                        if uciMove then onLiveUpdate(uciMove) end
-                    else
-                        uciMove = getBestMoveFromAPI(fen, apiToCall)
-                        if uciMove then onLiveUpdate(uciMove) end
-                    end
-                end
-            end
-            
+        if myState == stateVersion and not currentEngineSuggestion then
+            currentEngineSuggestion = findBestMoveFor(currentTurn)
+        end
+        
+        if myState == stateVersion then
+            updateSuggestionsDisplay()
+        end
+        checkDone()
+    end)
+
+    -- Thread 2: Endgame Tablebase (Syzygy/Lc0)
+    if isEndgame then
+        task.spawn(function()
+            local uciMove, _ = getEndgameSuggestion(fen, pCount)
             if myState == stateVersion and uciMove then
                 local fromR, fromC, toR, toC, _ = uciToMove(uciMove)
                 if fromR and fromC and toR and toC and squares[fromR] and squares[fromR][fromC] then
-                    local tempBoard = applyMoveToBoard(copyBoard(squares), {fromR=fromR, fromC=fromC, toR=toR, toC=toC, piece=squares[fromR][fromC].Text})
-                    local newFen = getSimpleFEN(tempBoard)
-                    if positionHistory[newFen] and positionHistory[newFen] >= 2 then
-                        warn("API suggested a draw by repetition. Overriding with local AI.")
-                        uciMove = nil
-                    end
-                else
-                    uciMove = nil
-                end
-            end
-            
-            if myState == stateVersion and uciMove then
-                local fromR, fromC, toR, toC, _ = uciToMove(uciMove)
-                if fromR and fromC and toR and toC and squares[fromR] and squares[fromR][fromC] then
-                    finalSuggestion = {
+                    currentEndgameSuggestion = {
                         fromR = fromR, fromC = fromC,
                         toR = toR, toC = toC,
                         piece = squares[fromR][fromC].Text,
@@ -1442,27 +1449,12 @@ local function suggestMoveForHuman()
                     }
                 end
             end
-
-            if myState == stateVersion and not finalSuggestion then
-                finalSuggestion = findBestMoveFor(currentTurn)
+            if myState == stateVersion then
+                updateSuggestionsDisplay()
             end
+            checkDone()
         end)
-
-        if not success then
-            warn("Suggestion Error: " .. tostring(err))
-        end
-
-        if myState == stateVersion then
-            if finalSuggestion then
-                showSuggestion(finalSuggestion, false, isEndgame) -- false for final (green/red)
-                statusLabel.Text = "Suggestion: " .. string.char(96+finalSuggestion.fromC) .. (9-finalSuggestion.fromR) .. " → " .. string.char(96+finalSuggestion.toC) .. (9-finalSuggestion.toR)
-            else
-                statusLabel.Text = "No suggestion available"
-            end
-        end
-        
-        isThinking = false
-    end)
+    end
 end
 
 -- --- Game State and Execution ---
@@ -1991,7 +1983,7 @@ local function matchLoop()
                 end
                 
                 turnStartBoard = copyBoard(squares)
-                clearSuggestionHighlight()
+                clearSuggestionsDisplay()
                 boardStableCount = 0
                 
                 -- After mirroring, if it's now the player's turn, suggest a move
@@ -2023,7 +2015,7 @@ local function matchLoop()
             end
             
             -- If it's player's turn and no suggestion active, generate one.
-            if not isAutoMoveActive and currentTurn == playerColor and not gamePaused and not currentSuggestion then
+            if not isAutoMoveActive and currentTurn == playerColor and not gamePaused and not currentEngineSuggestion and not currentEndgameSuggestion then
                 suggestMoveForHuman()
             end
         end
@@ -2095,16 +2087,10 @@ local function undoLastMove()
     book25Ply=lm.previousBook25Ply;
     currentTurn=getPieceColor(mp); 
     
-    clearHighlights()
-    if #moveHistory > 0 then
-        local prevMove = moveHistory[#moveHistory]
-        squares[prevMove.fromR][prevMove.fromC].BackgroundColor3 = Color3.fromRGB(255, 255, 0)
-        squares[prevMove.toR][prevMove.toC].BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    end
+    clearSuggestionsDisplay()
     
     if isMatching then
         turnStartBoard = copyBoard(squares)
-        clearSuggestionHighlight()
         if currentTurn == playerColor and not gamePaused then
             suggestMoveForHuman()
         end
@@ -2134,7 +2120,7 @@ local function setStatusOffline()
         matchButton.Text = "Match 3D"
         boardAnchor = nil
         clear3DVisuals()
-        clearSuggestionHighlight()
+        clearSuggestionsDisplay()
         lastSeenBoard3D = nil
         boardStableCount = 0
         currentPieceMap = {}
@@ -2258,7 +2244,7 @@ local function createChessGame(isEmpty)
                     
                     if not gamePaused then
                         turnStartBoard = copyBoard(squares)
-                        clearSuggestionHighlight()
+                        clearSuggestionsDisplay()
                         if not isAutoMoveActive and currentTurn == playerColor then
                             suggestMoveForHuman()
                         end
@@ -2359,7 +2345,7 @@ matchButton.MouseButton1Click:Connect(function()
         boardStableCount = 0
         currentPieceMap = {}
         clear3DVisuals()
-        clearSuggestionHighlight()
+        clearSuggestionsDisplay()
         
         local board3D, pieceMap
         local attempts = 0
@@ -2418,7 +2404,7 @@ matchButton.MouseButton1Click:Connect(function()
         matchButton.Text = "Match 3D"
         boardAnchor = nil
         clear3DVisuals()
-        clearSuggestionHighlight()
+        clearSuggestionsDisplay()
         lastSeenBoard3D = nil
         boardStableCount = 0
         currentPieceMap = {}
