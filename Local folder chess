@@ -174,23 +174,37 @@ task.spawn(function()
     end
 end)
 
--- Screen GUI
+-- Screen GUI (Always on Top Fix)
 local screenGui = Instance.new("ScreenGui")
-screenGui.Parent = player.PlayerGui
 screenGui.ResetOnSpawn = false
 screenGui.Name = "GuiVersion2"
+screenGui.DisplayOrder = 999999999 -- Forces UI to render on top of all other game UIs
+screenGui.IgnoreGuiInset = true
 
--- Main Frame (draggable)
+-- Attempt to parent to CoreGui/gethui() to bypass game UI hiding (like during cutscenes)
+local success, err = pcall(function()
+    if type(gethui) == "function" then
+        screenGui.Parent = gethui()
+    else
+        screenGui.Parent = game:GetService("CoreGui")
+    end
+end)
+
+if not success or not screenGui.Parent then
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+end
+
+-- Main Frame (draggable) - Shrunk by 25%
 local frame = Instance.new("Frame")
 frame.Parent = screenGui
 frame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-frame.Size = UDim2.new(0, 240, 0, 300)
+frame.Size = UDim2.new(0, 180, 0, 225)
 frame.Position = UDim2.new(0.3, 0, 0.4, -50)
 frame.Active = true
 frame.Draggable = true
 
--- Second Frame (Attached to Main Frame)
-local secondFrameWidth = 150
+-- Second Frame (Attached to Main Frame) - Shrunk by 25%
+local secondFrameWidth = 112
 local secondFrame = Instance.new("Frame")
 secondFrame.Parent = frame 
 secondFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
@@ -201,17 +215,17 @@ secondFrame.Name = "SecondFrame"
 
 local secondFrameLabel = Instance.new("TextLabel")
 secondFrameLabel.Parent = secondFrame
-secondFrameLabel.Size = UDim2.new(1, 0, 0, 30)
+secondFrameLabel.Size = UDim2.new(1, 0, 0, 22)
 secondFrameLabel.Text = "Settings/Info"
 secondFrameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 secondFrameLabel.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 secondFrameLabel.TextScaled = true
 
--- UI Elements for Second Frame
+-- UI Elements for Second Frame - Shrunk by 25%
 local trainButton = Instance.new("TextButton")
 trainButton.Parent = secondFrame
-trainButton.Size = UDim2.new(1, -10, 0, 25)
-trainButton.Position = UDim2.new(0, 5, 0, 40)
+trainButton.Size = UDim2.new(1, -8, 0, 19)
+trainButton.Position = UDim2.new(0, 4, 0, 30)
 trainButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 trainButton.Text = "Train"
 trainButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -219,8 +233,8 @@ trainButton.TextScaled = true
 
 local switchButton = Instance.new("TextButton")
 switchButton.Parent = secondFrame
-switchButton.Size = UDim2.new(1, -10, 0, 25)
-switchButton.Position = UDim2.new(0, 5, 0, 75)
+switchButton.Size = UDim2.new(1, -8, 0, 19)
+switchButton.Position = UDim2.new(0, 4, 0, 56)
 switchButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 switchButton.Text = "Switch Sides"
 switchButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -228,8 +242,8 @@ switchButton.TextScaled = true
 
 local flipButton = Instance.new("TextButton")
 flipButton.Parent = secondFrame
-flipButton.Size = UDim2.new(1, -10, 0, 25)
-flipButton.Position = UDim2.new(0, 5, 0, 110)
+flipButton.Size = UDim2.new(1, -8, 0, 19)
+flipButton.Position = UDim2.new(0, 4, 0, 82)
 flipButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 flipButton.Text = "Flip Board"
 flipButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -237,8 +251,8 @@ flipButton.TextScaled = true
 
 local moveButton = Instance.new("TextButton")
 moveButton.Parent = secondFrame
-moveButton.Size = UDim2.new(1, -10, 0, 25)
-moveButton.Position = UDim2.new(0, 5, 0, 145)
+moveButton.Size = UDim2.new(1, -8, 0, 19)
+moveButton.Position = UDim2.new(0, 4, 0, 108)
 moveButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 moveButton.Text = "Auto Move"
 moveButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -246,22 +260,22 @@ moveButton.TextScaled = true
 
 local switchApiButton = Instance.new("TextButton")
 switchApiButton.Parent = secondFrame
-switchApiButton.Size = UDim2.new(1, -10, 0, 25)
-switchApiButton.Position = UDim2.new(0, 5, 0, 180)
+switchApiButton.Size = UDim2.new(1, -8, 0, 19)
+switchApiButton.Position = UDim2.new(0, 4, 0, 135)
 switchApiButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 switchApiButton.Text = "API: Saychess"
 switchApiButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 switchApiButton.TextScaled = true
 
--- Depth Controls
+-- Depth Controls - Shrunk by 25%
 local stockfishDepth = 10 -- Default depth to 10
 local MAX_STOCKFISH_DEPTH = 15
 local MIN_STOCKFISH_DEPTH = 0 -- 0 means Local AI only (No API)
 
 local depthMinusBtn = Instance.new("TextButton")
 depthMinusBtn.Parent = secondFrame
-depthMinusBtn.Size = UDim2.new(0, 30, 0, 25)
-depthMinusBtn.Position = UDim2.new(0, 5, 0, 215)
+depthMinusBtn.Size = UDim2.new(0, 22, 0, 19)
+depthMinusBtn.Position = UDim2.new(0, 4, 0, 161)
 depthMinusBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 depthMinusBtn.Text = "-"
 depthMinusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -269,8 +283,8 @@ depthMinusBtn.TextScaled = true
 
 local depthTextBox = Instance.new("TextBox")
 depthTextBox.Parent = secondFrame
-depthTextBox.Size = UDim2.new(0, 70, 0, 25)
-depthTextBox.Position = UDim2.new(0, 40, 0, 215)
+depthTextBox.Size = UDim2.new(0, 52, 0, 19)
+depthTextBox.Position = UDim2.new(0, 30, 0, 161)
 depthTextBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 depthTextBox.Text = "Depth: " .. stockfishDepth
 depthTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -279,8 +293,8 @@ depthTextBox.ClearTextOnFocus = false
 
 local depthPlusBtn = Instance.new("TextButton")
 depthPlusBtn.Parent = secondFrame
-depthPlusBtn.Size = UDim2.new(0, 30, 0, 25)
-depthPlusBtn.Position = UDim2.new(0, 115, 0, 215)
+depthPlusBtn.Size = UDim2.new(0, 22, 0, 19)
+depthPlusBtn.Position = UDim2.new(0, 86, 0, 161)
 depthPlusBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 depthPlusBtn.Text = "+"
 depthPlusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -317,8 +331,8 @@ depthTextBox.FocusLost:Connect(function()
     updateDepthDisplay()
 end)
 
--- Button Layout Adjustment (main frame buttons)
-local buttonWidth, buttonHeight, buttonY, buttonSpacing = 70, 25, 10, 5
+-- Button Layout Adjustment (main frame buttons) - Shrunk by 25%
+local buttonWidth, buttonHeight, buttonY, buttonSpacing = 52, 19, 7, 4
 local onButton = Instance.new("TextButton")
 onButton.Parent, onButton.BackgroundColor3, onButton.Size, onButton.Position, onButton.Text, onButton.TextColor3, onButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, buttonWidth, 0, buttonHeight), UDim2.new(0, buttonSpacing, 0, buttonY), "On", Color3.fromRGB(255, 255, 255), true
 local offButton = Instance.new("TextButton")
@@ -327,15 +341,15 @@ local backButton = Instance.new("TextButton")
 backButton.Parent, backButton.BackgroundColor3, backButton.Size, backButton.Position, backButton.Text, backButton.TextColor3, backButton.TextScaled, backButton.Active = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, buttonWidth, 0, buttonHeight), UDim2.new(0, buttonSpacing * 3 + buttonWidth * 2, 0, buttonY), "Back", Color3.fromRGB(255, 255, 255), true, false
 
 local destroyButton = Instance.new("TextButton")
-destroyButton.Parent, destroyButton.BackgroundColor3, destroyButton.Size, destroyButton.Position, destroyButton.Text, destroyButton.TextColor3, destroyButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, 85, 0, 25), UDim2.new(0, 30, 0, 45), "Destroy", Color3.fromRGB(255, 255, 255), true
+destroyButton.Parent, destroyButton.BackgroundColor3, destroyButton.Size, destroyButton.Position, destroyButton.Text, destroyButton.TextColor3, destroyButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, 64, 0, 19), UDim2.new(0, 22, 0, 34), "Destroy", Color3.fromRGB(255, 255, 255), true
 
 local matchButton = Instance.new("TextButton")
-matchButton.Parent, matchButton.BackgroundColor3, matchButton.Size, matchButton.Position, matchButton.Text, matchButton.TextColor3, matchButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, 85, 0, 25), UDim2.new(0, 125, 0, 45), "Match 3D", Color3.fromRGB(255, 255, 255), true
+matchButton.Parent, matchButton.BackgroundColor3, matchButton.Size, matchButton.Position, matchButton.Text, matchButton.TextColor3, matchButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, 64, 0, 19), UDim2.new(0, 94, 0, 34), "Match 3D", Color3.fromRGB(255, 255, 255), true
 
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Parent, statusLabel.BackgroundColor3, statusLabel.Size, statusLabel.Position, statusLabel.Text, statusLabel.TextColor3, statusLabel.TextScaled = frame, Color3.fromRGB(60, 60, 60), UDim2.new(0, 240, 0, 25), UDim2.new(0, 0, 0, -25), "Status: Offline", Color3.fromRGB(255, 0, 0), true
+statusLabel.Parent, statusLabel.BackgroundColor3, statusLabel.Size, statusLabel.Position, statusLabel.Text, statusLabel.TextColor3, statusLabel.TextScaled = frame, Color3.fromRGB(60, 60, 60), UDim2.new(0, 180, 0, 19), UDim2.new(0, 0, 0, -19), "Status: Offline", Color3.fromRGB(255, 0, 0), true
 local toggleButton = Instance.new("TextButton")
-toggleButton.Parent, toggleButton.BackgroundColor3, toggleButton.Size, toggleButton.Position, toggleButton.Text, toggleButton.TextColor3, toggleButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, 20, 0, 25), UDim2.new(0, -20, 0, -25), "<", Color3.fromRGB(255, 255, 255), true
+toggleButton.Parent, toggleButton.BackgroundColor3, toggleButton.Size, toggleButton.Position, toggleButton.Text, toggleButton.TextColor3, toggleButton.TextScaled = frame, Color3.fromRGB(80, 80, 80), UDim2.new(0, 15, 0, 19), UDim2.new(0, -15, 0, -19), "<", Color3.fromRGB(255, 255, 255), true
 
 toggleButton.MouseButton1Click:Connect(function() secondFrame.Visible = not secondFrame.Visible; toggleButton.Text = secondFrame.Visible and ">" or "<" end)
 
@@ -541,7 +555,7 @@ end
 
 local function setBoardFlipped(flipped)
     if not chessBoard then return end
-    local size = 25
+    local size = 18.75
     for r = 1, 8 do
         for c = 1, 8 do
             local square = squares[r][c]
@@ -1179,7 +1193,7 @@ local function drawMoveHighlight(move, color1, color2)
         toSq.BackgroundColor3 = color1
     end
     
-    -- 2. 3D Piece
+    -- 2. 3D Piece (ALWAYS YELLOW)
     if isMatching and currentPieceMap then
         local key = move.fromR..","..move.fromC
         local model = currentPieceMap[key]
@@ -1187,21 +1201,15 @@ local function drawMoveHighlight(move, color1, color2)
             local hl = Instance.new("Highlight")
             hl.Name = "SuggestionHighlight"
             hl.Adornee = model
-            hl.FillColor = color1
-            hl.OutlineColor = color1
+            hl.FillColor = Color3.fromRGB(255, 255, 0) -- Always Yellow
+            hl.OutlineColor = Color3.fromRGB(255, 255, 0) -- Always Yellow
             hl.FillTransparency = 0.5
             hl.Parent = model
             table.insert(createdSuggestionHighlights, hl)
-            
-            if color2 then
-                local tw = TweenService:Create(hl, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {FillColor = color2, OutlineColor = color2})
-                tw:Play()
-                table.insert(suggestionTweens, tw)
-            end
         end
     end
     
-    -- 3. 3D Platform
+    -- 3. 3D Platform (Green/Red/Pulse)
     if isMatching and boardAnchor then
         local actualR = boardAnchor.flipRow and (9 - move.toR) or move.toR
         local actualC = boardAnchor.flipCol and (9 - move.toC) or move.toC
@@ -2025,7 +2033,7 @@ end
 local function flipBoard()
     if not gameActive or not chessBoard then return end
     isBoardFlipped = not isBoardFlipped
-    local size = 25
+    local size = 18.75
     for r = 1, 8 do
         for c = 1, 8 do
             local square = squares[r][c]
@@ -2178,8 +2186,8 @@ local function createChessGame(isEmpty)
     book25Ply = 1
 	hasMoved = {k=false,K=false,r1=false,r8=false,R1=false,R8=false}
 	if chessBoard then chessBoard:Destroy() end
-	chessBoard=Instance.new("Frame"); chessBoard.Parent,chessBoard.BackgroundColor3,chessBoard.Size,chessBoard.Position,chessBoard.BorderSizePixel=frame,Color3.fromRGB(200,200,200),UDim2.new(0,200,0,200),UDim2.new(0,20,0,80),0
-	local s=25; for r=1,8 do squares[r],originalColors[r]={},{} for c=1,8 do local sq=Instance.new("TextButton"); sq.Parent,sq.Size,sq.Position=chessBoard,UDim2.new(0,s,0,s),UDim2.new(0,(c-1)*s,0,(r-1)*s); local cl=((r+c)%2==0) and Color3.fromRGB(240,217,181) or Color3.fromRGB(181,136,99); sq.BackgroundColor3,originalColors[r][c]=cl,cl; sq.TextScaled,sq.Font,sq.TextColor3,sq.Text=true,Enum.Font.SourceSansBold,Color3.fromRGB(0,0,0),""; squares[r][c]=sq end end
+	chessBoard=Instance.new("Frame"); chessBoard.Parent,chessBoard.BackgroundColor3,chessBoard.Size,chessBoard.Position,chessBoard.BorderSizePixel=frame,Color3.fromRGB(200,200,200),UDim2.new(0,150,0,150),UDim2.new(0,15,0,60),0
+	local s=18.75; for r=1,8 do squares[r],originalColors[r]={},{} for c=1,8 do local sq=Instance.new("TextButton"); sq.Parent,sq.Size,sq.Position=chessBoard,UDim2.new(0,s,0,s),UDim2.new(0,(c-1)*s,0,(r-1)*s); local cl=((r+c)%2==0) and Color3.fromRGB(240,217,181) or Color3.fromRGB(181,136,99); sq.BackgroundColor3,originalColors[r][c]=cl,cl; sq.TextScaled,sq.Font,sq.TextColor3,sq.Text=true,Enum.Font.SourceSansBold,Color3.fromRGB(0,0,0),""; squares[r][c]=sq end end
 	
     local l
     if isEmpty then
@@ -2193,7 +2201,7 @@ local function createChessGame(isEmpty)
     local initialFen = getSimpleFEN(copyBoard(squares))
     positionHistory[initialFen] = 1
     
-	local function handlePromotion(pr,pc,pc_color) gamePaused=true; if promotionFrame then promotionFrame:Destroy() end; promotionFrame=Instance.new("Frame"); promotionFrame.Parent,promotionFrame.BackgroundColor3,promotionFrame.Size,promotionFrame.Position,promotionFrame.BorderSizePixel,promotionFrame.BorderColor3=frame,Color3.fromRGB(60,60,60),UDim2.new(0,200,0,40),UDim2.new(0,20,0,285),1,Color3.fromRGB(255,255,255); local ps,ptc={"Q","R","B","N"},getPieceTextColor(pc_color); for i,pl in ipairs(ps) do local btn=Instance.new("TextButton"); btn.Parent,btn.Size,btn.Position,btn.BackgroundColor3=promotionFrame,UDim2.new(0.25,0,1,0),UDim2.new((i-1)*0.25,0,0,0),Color3.fromRGB(80,80,80); local ft=(pc_color=="White") and pl:lower() or pl:upper(); btn.Text,btn.TextColor3,btn.TextScaled,btn.Font=ft,ptc,true,Enum.Font.SourceSansBold; table.insert(activeConnections,btn.MouseButton1Click:Connect(function() squares[pr][pc].Text,squares[pr][pc].TextColor3=ft,ptc; promotionFrame:Destroy(); promotionFrame,gamePaused=nil,false; currentTurn=(playerColor=="White") and "Black" or "White"; stateVersion = stateVersion + 1; if not checkGameState() then if currentTurn=="Black" then task.spawn(executeAIMoveForBlack) else task.spawn(executeAIMoveForWhite) end end end)) end end
+	local function handlePromotion(pr,pc,pc_color) gamePaused=true; if promotionFrame then promotionFrame:Destroy() end; promotionFrame=Instance.new("Frame"); promotionFrame.Parent,promotionFrame.BackgroundColor3,promotionFrame.Size,promotionFrame.Position,promotionFrame.BorderSizePixel,promotionFrame.BorderColor3=frame,Color3.fromRGB(60,60,60),UDim2.new(0,150,0,30),UDim2.new(0,15,0,213),1,Color3.fromRGB(255,255,255); local ps,ptc={"Q","R","B","N"},getPieceTextColor(pc_color); for i,pl in ipairs(ps) do local btn=Instance.new("TextButton"); btn.Parent,btn.Size,btn.Position,btn.BackgroundColor3=promotionFrame,UDim2.new(0.25,0,1,0),UDim2.new((i-1)*0.25,0,0,0),Color3.fromRGB(80,80,80); local ft=(pc_color=="White") and pl:lower() or pl:upper(); btn.Text,btn.TextColor3,btn.TextScaled,btn.Font=ft,ptc,true,Enum.Font.SourceSansBold; table.insert(activeConnections,btn.MouseButton1Click:Connect(function() squares[pr][pc].Text,squares[pr][pc].TextColor3=ft,ptc; promotionFrame:Destroy(); promotionFrame,gamePaused=nil,false; currentTurn=(playerColor=="White") and "Black" or "White"; stateVersion = stateVersion + 1; if not checkGameState() then if currentTurn=="Black" then task.spawn(executeAIMoveForBlack) else task.spawn(executeAIMoveForWhite) end end end)) end end
 	local function checkPromotion(er,ec) local p=squares[er][ec].Text; if p:lower()=='p' and (er==1 or er==8) then handlePromotion(er,ec,getPieceColor(p)); return true end; return false end
 	
 	local selected,sr,sc=nil,nil,nil; for r=1,8 do for c=1,8 do local sq=squares[r][c]; table.insert(activeConnections,sq.MouseButton1Click:Connect(function() 
