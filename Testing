@@ -29,9 +29,9 @@ local DASH_COOLDOWN = 1.5
 -- By default, it estimates based on your screen size, but you can hardcode numbers here.
 local screenX, screenY = camera.ViewportSize.X, camera.ViewportSize.Y
 local LEFT_DASH_X = screenX * 0.72
-local LEFT_DASH_Y = screenY * 1
+local LEFT_DASH_Y = screenY * 0.60
 local RIGHT_DASH_X = screenX * 0.85
-local RIGHT_DASH_Y = screenY * 1
+local RIGHT_DASH_Y = screenY * 0.60
 
 -- Touch Simulation Config
 local pointerOffsetX = -38 
