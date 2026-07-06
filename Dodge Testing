@@ -9,39 +9,43 @@ local camera = workspace.CurrentCamera
 -------------------------------------------------------------------------------
 -- CONFIGURATION
 -------------------------------------------------------------------------------
-local DODGE_SPEED = 45         
+local DODGE_SPEED = 35         -- Safety speed
 local ROAM_SPEED = 18          
 local THREAT_DISTANCE = 14     
 local BANANA_DISTANCE = 8      
 local WALL_CHECK_DIST = 18     
-local PLAYER_RADIUS = 3.0      -- Increased slightly to ensure we don't clip edges
+local PLAYER_RADIUS = 2.5      
 
 -- Jump Physics
 local JUMP_POWER = 85
 local GRAVITY_PULL = 180       
 
--- Dash Physics & Cooldowns
+-- Burst Physics (Dash & Roll)
 local DASH_SPEED = 75          
 local DASH_DURATION = 0.2      
 local DASH_COOLDOWN = 1.5
+local ROLL_COOLDOWN = 2.5
 
--- MOBILE DASH BUTTON COORDINATES (ADJUST THESE TO MATCH YOUR SCREEN)
--- By default, it estimates based on your screen size, but you can hardcode numbers here.
+-- EXACT MOBILE BUTTON COORDINATES
 local screenX, screenY = camera.ViewportSize.X, camera.ViewportSize.Y
 local LEFT_DASH_X = screenX * 0.77
 local LEFT_DASH_Y = screenY * 0.75
 local RIGHT_DASH_X = screenX * 0.85
 local RIGHT_DASH_Y = screenY * 0.75
+local ROLL_X = screenX * 0.80        -- Directly below Right Dash
+local ROLL_Y = screenY * 0.88
 
 -- Touch Simulation Config
 local pointerOffsetX = -38 
 local pointerOffsetY = 0   
 local TOUCH_ID_LEFT = 8823
 local TOUCH_ID_RIGHT = 8824
+local TOUCH_ID_ROLL = 8825
 
 -- Failsafe variables
 local lastLeftClickX, lastLeftClickY = 0, 0
 local lastRightClickX, lastRightClickY = 0, 0
+local lastRollClickX, lastRollClickY = 0, 0
 
 -- Anti-AFK System
 player.Idled:Connect(function()
@@ -132,6 +136,7 @@ end
 
 local pointerLeft = createPointer("PointerLeft")
 local pointerRight = createPointer("PointerRight")
+local pointerRoll = createPointer("PointerRoll")
 
 -------------------------------------------------------------------------------
 -- VIRTUAL TOUCH SIMULATOR
@@ -142,11 +147,8 @@ local function simulateTouch(isRight)
     local touchId = isRight and TOUCH_ID_RIGHT or TOUCH_ID_LEFT
     local ptr = isRight and pointerRight or pointerLeft
     
-    if isRight then
-        lastRightClickX, lastRightClickY = x, y
-    else
-        lastLeftClickX, lastLeftClickY = x, y
-    end
+    if isRight then lastRightClickX, lastRightClickY = x, y
+    else lastLeftClickX, lastLeftClickY = x, y end
 
     ptr.Position = UDim2.new(0, x + pointerOffsetX, 0, y + pointerOffsetY)
     ptr.Visible = true
@@ -164,6 +166,26 @@ local function simulateTouch(isRight)
     end)
 end
 
+local function simulateRoll()
+    local x, y = ROLL_X, ROLL_Y
+    lastRollClickX, lastRollClickY = x, y
+
+    pointerRoll.Position = UDim2.new(0, x + pointerOffsetX, 0, y + pointerOffsetY)
+    pointerRoll.Visible = true
+
+    task.spawn(function()
+        pcall(function()
+            vim:SendTouchEvent(TOUCH_ID_ROLL, 0, x, y) 
+            task.wait(0.05)
+            vim:SendTouchEvent(TOUCH_ID_ROLL, 1, x, y) 
+            task.wait(0.05)
+            vim:SendTouchEvent(TOUCH_ID_ROLL, 2, x, y) 
+        end)
+        task.wait(0.1)
+        pointerRoll.Visible = false
+    end)
+end
+
 -------------------------------------------------------------------------------
 -- HAZARD DETECTION
 -------------------------------------------------------------------------------
@@ -177,11 +199,12 @@ local currentYVel = 0
 local lastJumpTime = 0 
 
 local lastDashTime = 0
+local lastRollTime = 0
 local nextDashSide = "Left" 
-local isDashing = false
-local dashEndTime = 0
-local dashDir = Vector3.zero
-local dashLookDir = Vector3.zero
+local isBursting = false
+local burstEndTime = 0
+local burstDir = Vector3.zero
+local burstLookDir = Vector3.zero
 
 local lastRoamDir = Vector3.zero
 local lastRoamTime = 0
@@ -277,39 +300,70 @@ local function createESP(hazard, hType, isExtreme)
 end
 
 -------------------------------------------------------------------------------
--- ADVANCED MATH: CONTINUOUS COLLISION DETECTION (TCA)
+-- PHYSICS & MOVEMENT
 -------------------------------------------------------------------------------
--- Calculates the exact time two moving spheres will intersect.
-local function getTimeOfClosestApproach(pPos, pVel, pRad, bPos, bVel, bRad, maxTime)
-    local relPos = pPos - bPos
-    local relVel = pVel - bVel
-    
-    local a = relVel:Dot(relVel)
-    local b = 2 * relPos:Dot(relVel)
-    local c = relPos:Dot(relPos) - (pRad + bRad)^2
-
-    if c <= 0 then return 0 end -- Already colliding
-    if a == 0 then return nil end -- Not moving relative to each other
-
-    local discriminant = b^2 - 4*a*c
-    if discriminant < 0 then return nil end -- Will never collide
-
-    local t1 = (-b - math.sqrt(discriminant)) / (2*a)
-    local t2 = (-b + math.sqrt(discriminant)) / (2*a)
-
-    local tHit = math.min(t1, t2)
-    if tHit < 0 then tHit = math.max(t1, t2) end
-    
-    if tHit >= 0 and tHit <= maxTime then
-        return tHit -- Returns the exact second they will crash
-    end
-    return nil
-end
-
 local function getHRP()
     local char = player.Character
     if char then return char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid") end
     return nil, nil
+end
+
+-- GUI LEADERBOARD PARSER (1v1 DETECTION)
+local function get1v1OpponentFromLeaderboard()
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return nil end
+
+    local playingLbl, lobbyLbl
+    
+    -- Find the Y-bounds of the "Playing" section
+    for _, desc in ipairs(playerGui:GetDescendants()) do
+        if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+            local txt = string.lower(desc.Text)
+            if txt == "playing" or string.match(txt, "^playing%s*$") then playingLbl = desc end
+            if txt == "lobby" or string.match(txt, "^lobby%s*$") then lobbyLbl = desc end
+        end
+    end
+
+    if not playingLbl or not lobbyLbl then return nil end
+
+    local minY = playingLbl.AbsolutePosition.Y
+    local maxY = lobbyLbl.AbsolutePosition.Y
+    if minY >= maxY then return nil end 
+
+    local playingOpponents = {}
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            local nameFound = false
+            for _, desc in ipairs(playerGui:GetDescendants()) do
+                if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+                    if desc.Text == p.Name or desc.Text == p.DisplayName then
+                        local y = desc.AbsolutePosition.Y
+                        if y > minY and y < maxY then
+                            nameFound = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            if nameFound then
+                local char = p.Character
+                if char then
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    local hum = char:FindFirstChild("Humanoid")
+                    if hrp and hum and hum.Health > 0 then
+                        table.insert(playingOpponents, hrp)
+                    end
+                end
+            end
+        end
+    end
+
+    if #playingOpponents == 1 then
+        return playingOpponents[1]
+    end
+    return nil
 end
 
 local function applyPush(hrp, direction, useForceY, yVelocity, speed, lookDir)
@@ -374,14 +428,16 @@ local function applyPush(hrp, direction, useForceY, yVelocity, speed, lookDir)
     end
 end
 
--- Generate 36 directions for ultra-precise pathfinding
+-------------------------------------------------------------------------------
+-- HYPER-ADVANCED TIME-STEPPED PREDICTION ENGINE
+-------------------------------------------------------------------------------
 local dodgeDirections = {}
 for i = 1, 36 do
     local angle = (i / 36) * math.pi * 2
     table.insert(dodgeDirections, Vector3.new(math.cos(angle), 0, math.sin(angle)))
 end
 
-local function getBestDirection(hrpPos, threats, isRoaming)
+local function getBestDirection(hrpPos, threats, isRoaming, huntTargetPos)
     local bestDir = Vector3.zero
     local lowestDanger = math.huge
     
@@ -393,7 +449,7 @@ local function getBestDirection(hrpPos, threats, isRoaming)
     raycastParams.FilterDescendantsInstances = ignoreList
     
     local speedToUse = isRoaming and ROAM_SPEED or DODGE_SPEED
-    local predictionTime = isRoaming and 1.5 or 1.0
+    local timeSteps = isRoaming and {0.5, 1.0, 1.5} or {0.15, 0.3, 0.5, 0.75, 1.0, 1.5}
 
     for _, dir in ipairs(dodgeDirections) do
         local availableDist = WALL_CHECK_DIST
@@ -427,31 +483,43 @@ local function getBestDirection(hrpPos, threats, isRoaming)
             dangerScore = dangerScore + (2000 / availableDist) 
         end
         
-        local pVel = dir * speedToUse
-        local isPathBlocked = false
-
-        for _, t in ipairs(threats) do
-            local bPos2D = Vector3.new(t.pos.X, 0, t.pos.Z)
-            local bVel2D = Vector3.new(t.vel.X, 0, t.vel.Z)
+        local maxTestDist = math.min(12, availableDist - 1)
+        
+        for _, tStep in ipairs(timeSteps) do
+            local expectedTravel = math.min(speedToUse * tStep, maxTestDist)
+            local futurePlayerPos = hrpPos2D + (dir * expectedTravel)
             
-            -- ABSOLUTE PREDICTION: Will we crash into this ball?
-            local timeToHit = getTimeOfClosestApproach(hrpPos2D, pVel, PLAYER_RADIUS, bPos2D, bVel2D, t.threatRadius, predictionTime)
-            
-            if timeToHit then
-                -- If we hit a ball on this path, REJECT IT ENTIRELY. No matter the cost.
-                isPathBlocked = true
-                break
-            else
-                -- If we don't hit it, calculate how close we get to it (for roaming/spacing)
-                local futurePlayerPos = hrpPos2D + (pVel * predictionTime)
-                local futureThreatPos = bPos2D + (bVel2D * predictionTime)
-                local dist = (futurePlayerPos - futureThreatPos).Magnitude
-                dangerScore = dangerScore + (100 / math.max(0.1, dist))
+            for _, t in ipairs(threats) do
+                local futureThreatPos
+                if t.isStatic then
+                    futureThreatPos = Vector3.new(t.pos.X, 0, t.pos.Z)
+                else
+                    local bPos2D = Vector3.new(t.pos.X, 0, t.pos.Z)
+                    local bVel2D = Vector3.new(t.vel.X, 0, t.vel.Z)
+                    futureThreatPos = bPos2D + (bVel2D * tStep)
+                end
+                
+                local rawDist = (futurePlayerPos - futureThreatPos).Magnitude
+                local effectiveDist = math.max(0.1, rawDist - PLAYER_RADIUS)
+                
+                if isRoaming then
+                    dangerScore = dangerScore + (100 / effectiveDist)
+                else
+                    if effectiveDist < t.threatRadius then
+                        dangerScore = dangerScore + (10000 / effectiveDist)
+                    else
+                        dangerScore = dangerScore + (200 / (effectiveDist * effectiveDist))
+                    end
+                end
             end
         end
         
-        if isPathBlocked then continue end -- Skip this direction completely
-
+        if huntTargetPos then
+            local targetDir = (Vector3.new(huntTargetPos.X, 0, huntTargetPos.Z) - hrpPos2D).Unit
+            local dot = dir:Dot(targetDir) 
+            dangerScore = dangerScore - (dot * 25)
+        end
+        
         if dangerScore < lowestDanger then
             lowestDanger = dangerScore
             bestDir = dir
@@ -484,6 +552,10 @@ local function setOnline()
                 humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
             end
         end
+        
+        -- 1v1 GUI Leaderboard Detection
+        local opponentHrp = get1v1OpponentFromLeaderboard()
+        local huntTargetPos = opponentHrp and opponentHrp.Position or nil
         
         local activeThreats = {}
         local allHazardsList = {} 
@@ -582,19 +654,36 @@ local function setOnline()
             for _, bData in ipairs(activeThreats) do
                 local bPos2D = Vector3.new(bData.pos.X, 0, bData.pos.Z)
                 local bVel2D = Vector3.new(bData.vel.X, 0, bData.vel.Z)
-                local dist = (hrpPos2D - bPos2D).Magnitude
+                local W2D = hrpPos2D - bPos2D
+                local dist = W2D.Magnitude
                 
                 if dist < minThreatDist then
                     minThreatDist = dist
                     primaryThreat = bData
                 end
                 
-                -- Check if ball is an immediate threat
-                local timeToHit = getTimeOfClosestApproach(hrpPos2D, Vector3.zero, PLAYER_RADIUS, bPos2D, bVel2D, bData.threatRadius, 1.5)
-                if timeToHit or dist < bData.threatRadius then
-                    table.insert(threatsToDodge, bData)
-                    if bData.type == "Ball" and dist < 15 and bData.pos.Y < (hrpPos.Y + 2) then 
-                        shouldJump = true 
+                if bData.isStatic or bData.isExtreme then
+                    if dist < bData.threatRadius then
+                        table.insert(threatsToDodge, bData)
+                        if bData.type == "Ball" and dist < 15 and bData.pos.Y < (hrpPos.Y + 2) then 
+                            shouldJump = true 
+                        end
+                    end
+                else
+                    local vSq2D = bVel2D:Dot(bVel2D)
+                    if vSq2D > 0 then
+                        local t = W2D:Dot(bVel2D) / vSq2D
+                        if t > -0.1 and t < 1.5 then
+                            local closestPoint2D = bPos2D + bVel2D * t
+                            local distanceAtClosest2D = (hrpPos2D - closestPoint2D).Magnitude
+                            
+                            if distanceAtClosest2D < bData.threatRadius then
+                                table.insert(threatsToDodge, bData)
+                                if bData.type == "Ball" and distanceAtClosest2D < 5 and t < 0.6 and bData.pos.Y < (hrpPos.Y + 1.5) then
+                                    shouldJump = true
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -604,61 +693,99 @@ local function setOnline()
             local isRoaming = false
             local lookDirection = Vector3.zero
             
-            if primaryThreat then
+            if huntTargetPos then
+                local flatTargetPos = Vector3.new(huntTargetPos.X, hrpPos.Y, huntTargetPos.Z)
+                if (flatTargetPos - hrpPos).Magnitude > 0.1 then
+                    lookDirection = (flatTargetPos - hrpPos).Unit
+                end
+            elseif primaryThreat then
                 local flatThreatPos = Vector3.new(primaryThreat.pos.X, hrpPos.Y, primaryThreat.pos.Z)
                 if (flatThreatPos - hrpPos).Magnitude > 0.1 then
                     lookDirection = (flatThreatPos - hrpPos).Unit
                 end
             end
             
-            if isDashing and tick() < dashEndTime then
-                safeDirection = dashDir
-                lookDirection = dashLookDir
+            if isBursting and tick() < burstEndTime then
+                safeDirection = burstDir
+                lookDirection = burstLookDir
             else
-                isDashing = false
+                isBursting = false
                 
                 if #threatsToDodge > 0 then
-                    safeDirection, dangerLevel = getBestDirection(hrpPos, threatsToDodge, false)
+                    safeDirection, dangerLevel = getBestDirection(hrpPos, threatsToDodge, false, huntTargetPos)
                     
-                    -- If dangerLevel is math.huge, it means ALL 36 paths result in a collision.
-                    -- We MUST dash or jump to survive.
-                    if (dangerLevel == math.huge or dangerLevel > 1500) and tick() - lastDashTime > DASH_COOLDOWN and lookDirection ~= Vector3.zero then
+                    -- EMERGENCY BURST LOGIC (Dash or Roll)
+                    if dangerLevel > 4000 and lookDirection ~= Vector3.zero then
+                        local forwardVec = lookDirection
                         local rightVec = lookDirection:Cross(Vector3.new(0, 1, 0)).Unit
                         local leftVec = -rightVec
-                        local chosenDir = (nextDashSide == "Left") and leftVec or rightVec
                         
-                        local function isSafeDash(dir)
+                        local function isSafeBurst(dir)
                             local hit = workspace:Raycast(hrpPos, dir * 15, groundRayParams)
                             if hit and hit.Distance < 5 then return false end
                             if not workspace:Raycast(hrpPos + (dir * 15) + Vector3.new(0, 2, 0), Vector3.new(0, -15, 0), groundRayParams) then return false end
                             return true
                         end
                         
-                        if not isSafeDash(chosenDir) then
-                            chosenDir = (nextDashSide == "Left") and rightVec or leftVec
-                            nextDashSide = (nextDashSide == "Left") and "Right" or "Left"
+                        local chosenBurstDir = nil
+                        local burstType = nil
+                        
+                        -- 1. Check if Roll (Forward) is the best option and off cooldown
+                        local dotForward = safeDirection:Dot(forwardVec)
+                        if dotForward > 0.5 and tick() - lastRollTime > ROLL_COOLDOWN then
+                            if isSafeBurst(forwardVec) then
+                                chosenBurstDir = forwardVec
+                                burstType = "Roll"
+                            end
                         end
                         
-                        isDashing = true
-                        dashEndTime = tick() + DASH_DURATION
-                        dashDir = chosenDir
-                        dashLookDir = lookDirection
-                        lastDashTime = tick()
+                        -- 2. Fallback to Sideways Dash if Roll is unsafe/cooldown
+                        if not chosenBurstDir and tick() - lastDashTime > DASH_COOLDOWN then
+                            local sideDir = (nextDashSide == "Left") and leftVec or rightVec
+                            if not isSafeBurst(sideDir) then
+                                sideDir = (nextDashSide == "Left") and rightVec or leftVec
+                                nextDashSide = (nextDashSide == "Left") and "Right" or "Left"
+                            end
+                            if isSafeBurst(sideDir) then
+                                chosenBurstDir = sideDir
+                                burstType = "Dash"
+                            end
+                        end
                         
-                        -- TRIGGER MOBILE UI TOUCH
-                        local isDashingRight = (chosenDir == rightVec)
-                        simulateTouch(isDashingRight)
-                        
-                        nextDashSide = (nextDashSide == "Left") and "Right" or "Left"
-                        safeDirection = dashDir
+                        -- Execute Burst
+                        if chosenBurstDir then
+                            isBursting = true
+                            burstEndTime = tick() + DASH_DURATION
+                            burstDir = chosenBurstDir
+                            burstLookDir = lookDirection
+                            
+                            if burstType == "Roll" then
+                                lastRollTime = tick()
+                                simulateRoll()
+                            else
+                                lastDashTime = tick()
+                                local isDashingRight = (chosenBurstDir == rightVec)
+                                simulateTouch(isDashingRight)
+                                nextDashSide = (nextDashSide == "Left") and "Right" or "Left"
+                            end
+                            
+                            safeDirection = burstDir
+                        end
                     end
                 else
-                    if closestBallDist > 40 then
+                    if huntTargetPos then
+                        if tick() - lastRoamTime > 0.5 or lastRoamDir == Vector3.zero then
+                            lastRoamDir, _ = getBestDirection(hrpPos, allHazardsList, true, huntTargetPos)
+                            lastRoamTime = tick()
+                        end
+                        safeDirection = lastRoamDir
+                        isRoaming = true
+                    elseif closestBallDist > 40 then
                         safeDirection = Vector3.zero
                         lookDirection = hrp.CFrame.LookVector
                     elseif #allHazardsList > 0 then
                         if tick() - lastRoamTime > 0.5 or lastRoamDir == Vector3.zero then
-                            lastRoamDir, _ = getBestDirection(hrpPos, allHazardsList, true)
+                            lastRoamDir, _ = getBestDirection(hrpPos, allHazardsList, true, nil)
                             lastRoamTime = tick()
                         end
                         safeDirection = lastRoamDir
@@ -685,7 +812,7 @@ local function setOnline()
             end
             
             local moveSpeed = DODGE_SPEED
-            if isDashing then moveSpeed = DASH_SPEED
+            if isBursting then moveSpeed = DASH_SPEED
             elseif isRoaming then moveSpeed = ROAM_SPEED end
             
             if safeDirection ~= Vector3.zero then
@@ -711,9 +838,11 @@ local function setOffline()
     pcall(function()
         vim:SendTouchEvent(TOUCH_ID_LEFT, 2, lastLeftClickX, lastLeftClickY)
         vim:SendTouchEvent(TOUCH_ID_RIGHT, 2, lastRightClickX, lastRightClickY)
+        vim:SendTouchEvent(TOUCH_ID_ROLL, 2, lastRollClickX, lastRollClickY)
     end)
     pointerLeft.Visible = false
     pointerRight.Visible = false
+    pointerRoll.Visible = false
     
     local hrp = getHRP()
     if hrp then applyPush(hrp, Vector3.zero, false, 0, 0, nil) end
